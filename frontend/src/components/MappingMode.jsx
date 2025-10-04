@@ -78,6 +78,7 @@ const MappingMode = ({
                                 variant="outline"
                                 onClick={() => setCurrentPage(Math.max(0, currentPage - 1))}
                                 disabled={currentPage === 0}
+                                className={`${currentPage === 0 ? '' : 'cursor-pointer'}`}
                             >
                                 Previous Page
                             </Button>
@@ -85,6 +86,7 @@ const MappingMode = ({
                                 variant="outline"
                                 onClick={() => setCurrentPage(Math.min(pdfPages.length - 1, currentPage + 1))}
                                 disabled={currentPage === pdfPages.length - 1}
+                                className={`${currentPage === pdfPages.length - 1 ? '' : 'cursor-pointer'}`}
                             >
                                 Next Page
                             </Button>
@@ -92,7 +94,7 @@ const MappingMode = ({
 
                         <Button
                             onClick={saveToDB}
-                            className="w-full mt-4 bg-green-600 hover:bg-green-700"
+                            className="w-full mt-4 bg-green-600 hover:bg-green-700 cursor-pointer"
                         >
                             <Save className="inline mr-2" size={20} />
                             Save All Annotations to Database

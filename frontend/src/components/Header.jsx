@@ -19,7 +19,7 @@ const Header = ({ mode, setMode, pdfFile, loadFromDB }) => {
         <Button
           onClick={() => setMode('upload')}
           variant={mode === 'upload' ? 'default' : 'outline'}
-          className="flex items-center gap-2"
+          className="flex items-center gap-2 cursor-pointer"
         >
           <Upload size={18} />
           Upload PDF
@@ -29,7 +29,7 @@ const Header = ({ mode, setMode, pdfFile, loadFromDB }) => {
           onClick={() => { setMode('mapping'); loadFromDB(); }}
           disabled={!pdfFile}
           variant={mode === 'mapping' ? 'default' : 'outline'}
-          className="flex items-center gap-2"
+          className={`flex items-center gap-2 ${mode === 'mapping' ? '' : 'cursor-pointer'}`}
         >
           <Edit2 size={18} />
           Mapping Mode
@@ -39,7 +39,7 @@ const Header = ({ mode, setMode, pdfFile, loadFromDB }) => {
           onClick={() => { setMode('executive'); loadFromDB(); }}
           disabled={!pdfFile}
           variant={mode === 'executive' ? 'default' : 'outline'}
-          className="flex items-center gap-2"
+          className={`flex items-center gap-2 ${mode === 'executive' ? '' : 'cursor-pointer'}`}
         >
           <Eye size={18} />
           Executive View

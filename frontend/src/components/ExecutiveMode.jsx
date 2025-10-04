@@ -27,13 +27,13 @@ const ExecutiveMode = ({
 
         switch (field.type) {
             case 'DateField':
-                return <Input type="date" {...commonProps} />;
+                return <Input type="date" disabled {...commonProps} />;
             case 'NumberField':
-                return <Input type="number" {...commonProps} />;
+                return <Input type="number" disabled {...commonProps} />;
             case 'EmailField':
-                return <Input type="email" {...commonProps} />;
+                return <Input type="email" disabled {...commonProps} />;
             case 'TextAreaField':
-                return <Textarea {...commonProps} rows={3} />;
+                return <Textarea {...commonProps} disabled rows={3} />;
             case 'BooleanField':
                 return (
                     <div className="flex items-center">
@@ -43,7 +43,7 @@ const ExecutiveMode = ({
                 );
             case 'CharField':
             default:
-                return <Input type="text" {...commonProps} />;
+                return <Input type="text" disabled {...commonProps} />;
         }
     };
 

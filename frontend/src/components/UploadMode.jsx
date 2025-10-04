@@ -39,7 +39,7 @@ const UploadMode = ({ handleFileUpload, fileInputRef, pdfFile }) => {
                                 onChange={handleFileUpload}
                                 className="hidden"
                             />
-                            <Button onClick={handleUploadClick} className="bg-blue-600 hover:bg-blue-700">
+                            <Button onClick={handleUploadClick} className="bg-blue-600 cursor-pointer hover:bg-blue-700">
                                 Choose PDF File
                             </Button>
                             {pdfFile && (
