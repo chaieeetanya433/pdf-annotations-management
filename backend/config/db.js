@@ -2,13 +2,19 @@ const mongoose = require('mongoose');
 
 const connectDB = async () => {
     try {
-        await mongoose.connect('mongodb+srv://chai_eee_tanya:619@cluster0.jjdeb4h.mongodb.net/pdf_annotation_db?retryWrites=true&w=majority', {
+        if (!process.env.MONGO_URI) {
+            throw new Error('MONGO_URI environment variable is not defined');
+        }
+        
+        await mongoose.connect(process.env.MONGO_URI, {
             useNewUrlParser: true,
             useUnifiedTopology: true,
+            serverSelectionTimeoutMS: 5000, // Timeout after 5s
+            socketTimeoutMS: 45000, // Close sockets after 45s
         });
-        console.log("MongoDB connected");
+        console.log("MongoDB connected successfully");
     } catch (err) {
-        console.error(err.message);
+        console.error("MongoDB connection error:", err.message);
         process.exit(1);
     }
 };
