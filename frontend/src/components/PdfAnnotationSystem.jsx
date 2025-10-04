@@ -1,226 +1,305 @@
-// src/PDFAnnotationSystem.jsx
-import React, { useState, useRef, useEffect } from "react";
-import { Upload, ZoomIn, ZoomOut, Save, ChevronLeft, ChevronRight, Eye } from "lucide-react";
-import { uploadPDF, saveAnnotations, fetchAnnotations, updateAnnotation as apiUpdateAnnotation, deleteAnnotation as apiDeleteAnnotation } from "../helpers/api";
-import { loadPDF } from "../helpers/pdfRenderer";
+// PDFAnnotationSystem.jsx
+import React, { useState, useRef, useEffect } from 'react';
+import { Upload, ZoomIn, ZoomOut, Save, Eye, Download, Trash2, Edit2, CheckSquare, X, AlertCircle, Check } from 'lucide-react';
+import { uploadPDF, saveAnnotations, fetchAnnotations, updateAnnotation as apiUpdateAnnotation, deleteAnnotation as apiDeleteAnnotation } from '../helpers/api';
+import { loadPDF, renderPage } from '../helpers/pdfRenderer';
 
-import AppToaster from "./Toaster";
-import GenericModal from "./GenericModal";
-import PDFUploader from "./PDFUploader";
-import PDFCanvas from "./PDFCanvas";
-import AnnotationForm from "./AnnotationForm";
-import AnnotationList from "./AnnotationList";
+// Dialog Component for notifications
+const Dialog = ({ isOpen, onClose, title, children, type = 'info' }) => {
+    if (!isOpen) return null;
 
-import toast from "react-hot-toast";
+    const getIcon = () => {
+        switch (type) {
+            case 'error': return <AlertCircle className="text-red-500" size={24} />;
+            case 'success': return <Check className="text-green-500" size={24} />;
+            default: return <AlertCircle className="text-blue-500" size={24} />;
+        }
+    };
 
-// convert pixel -> normalized
-const pixelToNormalized = (bbox, pageWidth, pageHeight) => {
-    return [
-        bbox[0] / pageWidth,
-        bbox[1] / pageHeight,
-        bbox[2] / pageWidth,
-        bbox[3] / pageHeight,
-    ];
-};
-
-// convert normalized -> pixel
-const normalizedToPixel = (bbox, pageWidth, pageHeight) => {
-    return [
-        bbox[0] * pageWidth,
-        bbox[1] * pageHeight,
-        bbox[2] * pageWidth,
-        bbox[3] * pageHeight,
-    ];
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+                <div className="flex items-center justify-between p-4 border-b">
+                    <div className="flex items-center gap-2">
+                        {getIcon()}
+                        <h3 className="text-lg font-semibold">{title}</h3>
+                    </div>
+                    <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+                        <X size={20} />
+                    </button>
+                </div>
+                <div className="p-4">
+                    {children}
+                </div>
+                <div className="p-4 border-t flex justify-end">
+                    <button 
+                        onClick={onClose} 
+                        className={`px-4 py-2 rounded font-medium ${
+                            type === 'error' ? 'bg-red-600 hover:bg-red-700' : 
+                            type === 'success' ? 'bg-green-600 hover:bg-green-700' : 
+                            'bg-blue-600 hover:bg-blue-700'
+                        } text-white`}
+                    >
+                        OK
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
 };
 
 const PDFAnnotationSystem = () => {
-    const [mode, setMode] = useState("upload");
+    const [mode, setMode] = useState('upload'); // upload, mapping, executive
     const [pdfFile, setPdfFile] = useState(null);
     const [pdfDoc, setPdfDoc] = useState(null);
-    const [pdfPages, setPdfPages] = useState([]);
+    const [pdfPages, setPdfPages] = useState([]); // { pageNumber, width, height }
     const [currentPage, setCurrentPage] = useState(0);
     const [zoom, setZoom] = useState(1);
-    const [annotations, setAnnotations] = useState([]);
-    const [selectedAnnotation, setSelectedAnnotation] = useState(null);
-    const [editingAnnotation, setEditingAnnotation] = useState(null);
-    const [confirmModal, setConfirmModal] = useState({ open: false, ann: null, onConfirm: null });
-    const [loading, setLoading] = useState(false);
-    const [currentDocumentId, setCurrentDocumentId] = useState(null);
+    const [isDrawing, setIsDrawing] = useState(false);
+    const [startPoint, setStartPoint] = useState(null);
+    const [annotations, setAnnotations] = useState([]); // local annotation objects
+    const [selectedAnnotation, setSelectedAnnotation] = useState(null); // { bbox, page }
+    const [formFields, setFormFields] = useState([]);
+    const [highlightedField, setHighlightedField] = useState(null);
 
+    const canvasRef = useRef(null);
     const fileInputRef = useRef(null);
 
     const [processId] = useState(49);
     const [formId] = useState(20);
 
+    // Dialog state
+    const [dialog, setDialog] = useState({
+        isOpen: false,
+        title: '',
+        message: '',
+        type: 'info'
+    });
+
+    const fieldTypes = ['CharField', 'DateField', 'NumberField', 'EmailField', 'TextAreaField', 'BooleanField'];
+
     const [fieldMetadata, setFieldMetadata] = useState({
-        field_name: "",
-        field_header: "",
-        field_type: "CharField",
-        placeholder: "",
+        field_name: '',
+        field_header: '',
+        field_type: 'CharField',
+        placeholder: '',
         required: false,
         max_length: 50
     });
 
-    // Reset form to defaults
-    const resetForm = () => {
-        setFieldMetadata({
-            field_name: "",
-            field_header: "",
-            field_type: "CharField",
-            placeholder: "",
-            required: false,
-            max_length: 50
+    // Function to show dialog
+    const showDialog = (title, message, type = 'info') => {
+        setDialog({
+            isOpen: true,
+            title,
+            message,
+            type
         });
-        setSelectedAnnotation(null);
-        setEditingAnnotation(null);
     };
 
-    // --- upload handler ---
+    // Function to close dialog
+    const closeDialog = () => {
+        setDialog(prev => ({ ...prev, isOpen: false }));
+    };
+
+    // --- File upload & PDF loading ---
     const handleFileUpload = async (e) => {
-        const file = e.target.files?.[0];
-        if (!file || file.type !== "application/pdf") {
-            toast.error("Please upload a valid PDF file");
+        const file = e.target.files[0];
+        if (!file || file.type !== 'application/pdf') {
+            showDialog('Invalid File', 'Please upload a valid PDF file', 'error');
             return;
         }
 
         try {
-            setLoading(true);
+            // Upload to backend (Cloudinary via API) - optional, keep the response
             const res = await uploadPDF(file, processId, formId);
-            console.log("Uploaded PDF:", res);
-
-            // Store document ID from upload response
-            const documentId = res?.document_id || res?.id || `doc_${Date.now()}`;
-            setCurrentDocumentId(documentId);
+            console.log('Uploaded PDF:', res);
 
             setPdfFile(file);
+
+            // Load PDF with pdf.js
             const pdf = await loadPDF(file);
             setPdfDoc(pdf);
 
-            const pages = Array.from({ length: pdf.numPages }, (_, i) => ({
-                pageNumber: i + 1,
-                width: null,
-                height: null
-            }));
+            // Prepare page metadata (we fetch page viewport sizes by rendering first page at scale 1 temporarily)
+            const pages = [];
+            for (let i = 1; i <= pdf.numPages; i++) {
+                // we'll get width/height on demand when rendering to canvas, but keep page numbers
+                pages.push({ pageNumber: i, width: null, height: null });
+            }
             setPdfPages(pages);
-            setMode("mapping");
+
+            setMode('mapping');
             setCurrentPage(0);
-            setAnnotations([]); // Reset annotations for new document
-            toast.success("PDF loaded — you can start mapping fields");
+            // Slight delay to let canvas render effect run
         } catch (err) {
-            console.error("Upload error:", err);
-            toast.error("Failed to upload or load PDF");
-        } finally {
-            setLoading(false);
+            console.error('Upload error:', err);
+            showDialog('Upload Failed', 'Failed to upload or load PDF. Please try again.', 'error');
         }
     };
 
-    // --- load annotations from backend ---
-    const loadFromDB = async () => {
-        if (!currentDocumentId) {
-            console.warn("No document ID available");
-            return;
-        }
+    // Render PDF page + overlays whenever relevant state changes
+    useEffect(() => {
+        if ((mode === 'mapping' || mode === 'executive') && pdfDoc) {
+            (async () => {
+                try {
+                    const canvas = canvasRef.current;
+                    if (!canvas) return;
 
-        try {
-            setLoading(true);
-            const res = await fetchAnnotations(processId, formId, currentDocumentId);
-            if (!res || !Array.isArray(res)) {
-                toast("No annotations found for this document", { icon: "ℹ️" });
-                setAnnotations([]);
-                return;
+                    // Render PDF page to canvas using helper (scale = zoom)
+                    const { width, height } = await renderPage(pdfDoc, currentPage + 1, canvas, zoom);
+
+                    // Save page size if not set
+                    setPdfPages(prev => prev.map(p => p.pageNumber === currentPage + 1 ? { ...p, width, height } : p));
+
+                    // Now draw overlays (annotations) on top of the rendered PDF
+                    const ctx = canvas.getContext('2d');
+
+                    // Draw annotations for current page
+                    annotations
+                        .filter(ann => ann.page === currentPage + 1)
+                        .forEach(ann => {
+                            const isHighlighted = highlightedField === ann.field_id || highlightedField === ann.id;
+                            ctx.strokeStyle = isHighlighted ? '#10b981' : '#3b82f6';
+                            ctx.fillStyle = isHighlighted ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.12)';
+                            ctx.lineWidth = isHighlighted ? 3 : 2;
+
+                            // ann.bbox stored in PDF pixel coordinates (x1,y1,x2,y2)
+                            const x = ann.bbox[0] * zoom;
+                            const y = ann.bbox[1] * zoom;
+                            const w = (ann.bbox[2] - ann.bbox[0]) * zoom;
+                            const h = (ann.bbox[3] - ann.bbox[1]) * zoom;
+
+                            ctx.fillRect(x, y, w, h);
+                            ctx.strokeRect(x, y, w, h);
+
+                            // label
+                            ctx.fillStyle = isHighlighted ? '#065f46' : '#1e3a8a';
+                            ctx.font = `bold ${12 * zoom}px Arial`;
+                            ctx.fillText(ann.field_name || 'field', x + 4 * zoom, y + 12 * zoom);
+                        });
+
+                    // If user is drawing a new box, draw dashed outline
+                    if (isDrawing && startPoint) {
+                        // We don't have the current mouse coords here, so handleMouseMove draws ephemeral outline.
+                        // This is kept to ensure background is rendered when drawing starts.
+                    }
+                } catch (err) {
+                    console.error('Render error:', err);
+                    showDialog('Render Error', 'Failed to render PDF page. Please try again.', 'error');
+                }
+            })();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentPage, zoom, annotations, highlightedField, mode, pdfDoc]);
+
+    // --- Mouse handlers for mapping mode (drawing) ---
+    const handleMouseDown = (e) => {
+        if (mode !== 'mapping') return;
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left) / zoom;
+        const y = (e.clientY - rect.top) / zoom;
+        setIsDrawing(true);
+        setStartPoint({ x, y });
+    };
+
+    const handleMouseMove = (e) => {
+        if (!isDrawing || mode !== 'mapping') return;
+        const canvas = canvasRef.current;
+        if (!canvas || !startPoint) return;
+        const ctx = canvas.getContext('2d');
+        // Re-render PDF page to clear previous temp drawings
+        (async () => {
+            if (pdfDoc) {
+                await renderPage(pdfDoc, currentPage + 1, canvas, zoom);
+            } else {
+                // fallback: clear
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
             }
 
-            const mapped = res
-                .filter(item => item.document_id === currentDocumentId || item.process === processId)
-                .map(item => {
-                    const ann = item.annotation || {};
-                    let bbox = item.bbox || ann.bbox || ann?.bbox?.normalized || null;
+            // draw existing annotations overlay again
+            annotations
+                .filter(ann => ann.page === currentPage + 1)
+                .forEach(ann => {
+                    const isHighlighted = highlightedField === ann.field_id || highlightedField === ann.id;
+                    ctx.strokeStyle = isHighlighted ? '#10b981' : '#3b82f6';
+                    ctx.fillStyle = isHighlighted ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.12)';
+                    ctx.lineWidth = isHighlighted ? 3 : 2;
 
-                    if (bbox && typeof bbox === "object" && !Array.isArray(bbox)) {
-                        if ("x1" in bbox) {
-                            bbox = [bbox.x1, bbox.y1, bbox.x2, bbox.y2];
-                        } else if ("x_min" in bbox) {
-                            bbox = [bbox.x_min, bbox.y_min, bbox.x_max, bbox.y_max];
-                        }
-                    }
+                    const x = ann.bbox[0] * zoom;
+                    const y = ann.bbox[1] * zoom;
+                    const w = (ann.bbox[2] - ann.bbox[0]) * zoom;
+                    const h = (ann.bbox[3] - ann.bbox[1]) * zoom;
 
-                    const normalized = bbox && bbox.every(v => typeof v === "number" && v <= 1);
+                    ctx.fillRect(x, y, w, h);
+                    ctx.strokeRect(x, y, w, h);
 
-                    return {
-                        ...item,
-                        id: item.id || item.field_id,
-                        field_id: item.field_id || item.id,
-                        bbox,
-                        page: item.page || (ann && ann.page) || 1,
-                        field_name: item.field_name || item.annotation?.field_name || item.name,
-                        field_type: item.field_type || item.types || "CharField",
-                        document_id: currentDocumentId,
-                        metadata: {
-                            placeholder: item.placeholder || item.metadata?.placeholder || "",
-                            required: item.required || item.metadata?.required || false,
-                            max_length: item.max_length || item.metadata?.max_length || 0
-                        },
-                        _saved: true,
-                        _normalized: normalized
-                    };
+                    ctx.fillStyle = isHighlighted ? '#065f46' : '#1e3a8a';
+                    ctx.font = `bold ${12 * zoom}px Arial`;
+                    ctx.fillText(ann.field_name || 'field', x + 4 * zoom, y + 12 * zoom);
                 });
 
-            setAnnotations(mapped);
-            toast.success(`Loaded ${mapped.length} annotations for this document`);
-        } catch (err) {
-            console.error("Fetch error:", err);
-            toast.error("Failed to fetch annotations");
-        } finally {
-            setLoading(false);
-        }
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX - rect.left) / zoom;
+            const y = (e.clientY - rect.top) / zoom;
+
+            ctx.strokeStyle = '#ef4444';
+            ctx.setLineDash([6, 4]);
+            ctx.lineWidth = 2;
+            ctx.strokeRect(
+                startPoint.x * zoom,
+                startPoint.y * zoom,
+                (x - startPoint.x) * zoom,
+                (y - startPoint.y) * zoom
+            );
+            ctx.setLineDash([]);
+        })();
     };
 
-    useEffect(() => {
-        if ((mode === "mapping" || mode === "executive") && pdfDoc && currentDocumentId) {
-            loadFromDB();
-        }
-    }, [mode, pdfDoc, currentDocumentId]);
+    const handleMouseUp = (e) => {
+        if (!isDrawing || mode !== 'mapping') return;
+        const canvas = canvasRef.current;
+        if (!canvas || !startPoint) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left) / zoom;
+        const y = (e.clientY - rect.top) / zoom;
 
-    const handleStartDrawing = (point) => {
-        // Clear any editing state when starting new drawing
-        if (editingAnnotation) {
-            resetForm();
+        const bbox = [
+            Math.min(startPoint.x, x),
+            Math.min(startPoint.y, y),
+            Math.max(startPoint.x, x),
+            Math.max(startPoint.y, y)
+        ];
+
+        // require minimum pixel size
+        if (bbox[2] - bbox[0] > 10 && bbox[3] - bbox[1] > 10) {
+            // bbox currently in PDF canvas coordinates (pixels)
+            setSelectedAnnotation({ bbox, page: currentPage + 1 });
         }
+
+        setIsDrawing(false);
+        setStartPoint(null);
     };
 
-    const handleDrawing = ({ start, current }) => {
-        // optional preview
-    };
-
-    const handleFinishDrawing = ({ bbox, page }) => {
-        if ((bbox[2] - bbox[0]) < 8 || (bbox[3] - bbox[1]) < 8) {
-            toast.error("Box too small - draw a larger area");
+    // --- Save a single annotation locally (then user will call saveToDB to persist) ---
+    const saveAnnotation = () => {
+        if (!selectedAnnotation || !fieldMetadata.field_name) {
+            showDialog('Missing Information', 'Please draw a box and fill in field details', 'error');
             return;
         }
 
-        setSelectedAnnotation({ bbox, page });
-        setEditingAnnotation(null);
-        resetForm();
-        toast("Box captured — fill field metadata below", { icon: "✍️" });
-    };
-
-    // Save new annotation
-    const saveAnnotationLocal = () => {
-        if (!selectedAnnotation || !fieldMetadata.field_name.trim()) {
-            toast.error("Draw a box and provide field name");
-            return;
-        }
-
-        const id = Date.now().toString();
-        const newAnn = {
-            id,
-            field_id: id,
+        const newAnnotation = {
+            // id: local unique id
+            id: Date.now().toString(),
+            // field_id should be assigned by backend ideally; use timestamp locally
+            field_id: Date.now().toString(),
             process: processId,
             form_id: formId,
-            document_id: currentDocumentId,
-            field_name: fieldMetadata.field_name.trim(),
-            field_header: fieldMetadata.field_header.trim(),
-            bbox: selectedAnnotation.bbox,
+            field_name: fieldMetadata.field_name,
+            field_header: fieldMetadata.field_header,
+            bbox: selectedAnnotation.bbox, // in pixel coords relative to rendered page at scale=1 (we stored using current zoom)
             page: selectedAnnotation.page,
             scale: zoom,
             field_type: fieldMetadata.field_type,
@@ -229,512 +308,461 @@ const PDFAnnotationSystem = () => {
                 max_length: fieldMetadata.max_length,
                 placeholder: fieldMetadata.placeholder
             },
+            // mark as not-yet-saved to backend
             _saved: false
         };
 
-        setAnnotations(prev => [...prev, newAnn]);
-        resetForm();
-        toast.success("Annotation added — remember to 'Save All' to persist");
-    };
-
-    // Save all annotations to backend
-    const persistAll = async () => {
-        if (!annotations || annotations.length === 0) {
-            toast.error("Nothing to save");
-            return;
-        }
-
-        const newAnns = annotations.filter(a => !a._saved);
-        const existingAnns = annotations.filter(a => a._saved);
-
-        const payload = newAnns.map(ann => ({
-            process: ann.process,
-            form_id: ann.form_id,
-            document_id: currentDocumentId,
-            field_id: ann.field_id,
-            field_name: ann.field_name,
-            field_header: ann.field_header,
-            bbox: ann.bbox,
-            page: ann.page,
-            scale: ann.scale,
-            field_type: ann.field_type,
-            metadata: ann.metadata
-        }));
-
-        try {
-            setLoading(true);
-
-            if (payload.length > 0) {
-                const created = await saveAnnotations(payload);
-                console.log("Bulk saved:", created);
-            }
-
-            for (const ann of existingAnns) {
-                try {
-                    await apiUpdateAnnotation(ann.field_id, {
-                        process: ann.process,
-                        form_id: ann.form_id,
-                        document_id: currentDocumentId,
-                        field_id: ann.field_id,
-                        field_name: ann.field_name,
-                        field_header: ann.field_header,
-                        bbox: ann.bbox,
-                        page: ann.page,
-                        scale: ann.scale,
-                        field_type: ann.field_type,
-                        metadata: ann.metadata
-                    });
-                } catch (err) {
-                    console.warn("Update failed for", ann.field_id, err);
-                }
-            }
-
-            setAnnotations(prev => prev.map(a => ({ ...a, _saved: true })));
-            toast.success(`All annotations saved successfully`);
-        } catch (err) {
-            console.error("Persist error:", err);
-            toast.error("Failed to persist annotations");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const onDeleteRequest = (ann) => {
-        setConfirmModal({
-            open: true,
-            ann,
-            onConfirm: async () => {
-                try {
-                    setConfirmModal(m => ({ ...m, open: false }));
-                    if (ann._saved) {
-                        await apiDeleteAnnotation(ann.field_id);
-                    }
-                    setAnnotations(prev => prev.filter(a => a.id !== ann.id && a.field_id !== ann.field_id));
-
-                    // Clear form if this was being edited
-                    if (editingAnnotation?.id === ann.id) {
-                        resetForm();
-                    }
-
-                    toast.success("Annotation deleted");
-                } catch (err) {
-                    console.error("Delete error:", err);
-                    toast.error("Failed to delete annotation");
-                }
-            }
-        });
-    };
-
-    const onEditRequest = (ann) => {
-        // Populate form with annotation data
-        setEditingAnnotation(ann);
+        setAnnotations(prev => [...prev, newAnnotation]);
         setSelectedAnnotation(null);
         setFieldMetadata({
-            field_name: ann.field_name,
-            field_header: ann.field_header || "",
-            field_type: ann.field_type,
-            placeholder: ann.metadata?.placeholder || "",
-            required: ann.metadata?.required || false,
-            max_length: ann.metadata?.max_length || 50
+            field_name: '',
+            field_header: '',
+            field_type: 'CharField',
+            placeholder: '',
+            required: false,
+            max_length: 50
         });
 
-        // Navigate to annotation's page
-        setCurrentPage(ann.page - 1);
-        toast.info(`Editing: ${ann.field_name}`);
+        showDialog('Annotation Saved', 'Annotation saved locally. Click "Save All Annotations to Database" to persist.', 'success');
     };
 
-    const saveEdit = async () => {
-        if (!editingAnnotation || !fieldMetadata.field_name.trim()) {
-            toast.error("Field name is required");
+    // --- Save all annotations to backend (uses saveAnnotations for new ones; updateAnnotation for saved ones) ---
+    const saveToDB = async () => {
+        if (annotations.length === 0) {
+            showDialog('No Annotations', 'No annotations to save.', 'error');
             return;
         }
 
-        const updated = {
-            ...editingAnnotation,
-            field_name: fieldMetadata.field_name.trim(),
-            field_header: fieldMetadata.field_header.trim(),
-            field_type: fieldMetadata.field_type,
-            metadata: {
-                placeholder: fieldMetadata.placeholder,
-                required: fieldMetadata.required,
-                max_length: fieldMetadata.max_length
+        try {
+            // Split annotations into new and existing
+            const newAnns = annotations.filter(a => !a._saved);
+            const existingAnns = annotations.filter(a => a._saved);
+
+            // For new annotations, call saveAnnotations in bulk (assumes backend supports bulk create/upsert)
+            if (newAnns.length > 0) {
+                const payload = newAnns.map(ann => ({
+                    process: ann.process,
+                    form_id: ann.form_id,
+                    field_id: ann.field_id,
+                    field_name: ann.field_name,
+                    field_header: ann.field_header,
+                    bbox: ann.bbox,
+                    page: ann.page,
+                    scale: ann.scale,
+                    field_type: ann.field_type,
+                    metadata: ann.metadata
+                }));
+
+                const res = await saveAnnotations(payload);
+                console.log('Saved new annotations:', res);
+
+                // Mark them as saved and attach any backend ids if returned.
+                // If backend returns created objects, map them back. Here we'll assume success and mark saved.
+                setAnnotations(prev => prev.map(a => ({ ...a, _saved: true })));
             }
-        };
 
-        setAnnotations(prev => prev.map(a =>
-            (a.id === updated.id || a.field_id === updated.field_id) ? updated : a
-        ));
+            // For existing annotations, call updateAnnotation for each
+            for (const ann of existingAnns) {
+                // Build update payload - your API might expect a different shape
+                const updatePayload = {
+                    process: ann.process,
+                    form_id: ann.form_id,
+                    field_id: ann.field_id,
+                    field_name: ann.field_name,
+                    field_header: ann.field_header,
+                    bbox: ann.bbox,
+                    page: ann.page,
+                    scale: ann.scale,
+                    field_type: ann.field_type,
+                    metadata: ann.metadata
+                };
+                try {
+                    const updated = await apiUpdateAnnotation(ann.field_id, updatePayload);
+                    console.log('Updated annotation', ann.field_id, updated);
+                } catch (err) {
+                    console.warn('Failed to update annotation', ann.field_id, err);
+                }
+            }
 
-        if (updated._saved) {
-            try {
-                await apiUpdateAnnotation(updated.field_id, {
-                    process: updated.process,
-                    form_id: updated.form_id,
-                    document_id: currentDocumentId,
-                    field_id: updated.field_id,
-                    field_name: updated.field_name,
-                    field_header: updated.field_header,
-                    bbox: updated.bbox,
-                    page: updated.page,
-                    scale: updated.scale,
-                    field_type: updated.field_type,
-                    metadata: updated.metadata
+            showDialog('Success', `Saved ${annotations.length} annotations to database!`, 'success');
+        } catch (err) {
+            console.error('Save error:', err);
+            showDialog('Save Failed', 'Failed to save annotations. Please check your connection and try again.', 'error');
+        }
+    };
+
+    // --- Load annotations from backend and map to local coordinate system ---
+    const loadFromDB = async () => {
+        try {
+            console.log('Fetching annotations for process:', processId, 'form:', formId);
+            const res = await fetchAnnotations(processId, formId);
+            console.log('Fetched annotations:', res);
+
+            // Check if response is valid
+            if (!res) {
+                throw new Error('No response from server');
+            }
+
+            // Check if response is an array
+            if (!Array.isArray(res)) {
+                throw new Error('Invalid response format: expected an array');
+            }
+
+            if (res.length > 0) {
+                // Map backend annotations to local representation.
+                // The backend response has a different structure than what we expect
+                const mapped = res.map(ann => {
+                    // Extract bbox from the annotation object
+                    const bbox = ann.annotation && ann.annotation.bbox ? 
+                        [ann.annotation.bbox.x1, ann.annotation.bbox.y1, ann.annotation.bbox.x2, ann.annotation.bbox.y2] : 
+                        [0, 0, 0, 0];
+                    
+                    return {
+                        id: ann.id || ann.field_id,
+                        field_id: ann.field_id || ann.id,
+                        field_name: ann.field_name,
+                        field_header: ann.field_header,
+                        bbox: bbox,
+                        page: ann.annotation ? ann.annotation.page : 1,
+                        field_type: ann.field_type,
+                        metadata: {
+                            required: ann.required || false,
+                            max_length: ann.max_length || 50,
+                            placeholder: ann.placeholder || ''
+                        },
+                        process: parseInt(ann.process_id) || processId,
+                        form_id: parseInt(ann.form_id) || formId,
+                        scale: 1,
+                        _saved: true
+                    };
                 });
-                toast.success("Annotation updated");
+
+                setAnnotations(mapped);
+
+                // Build form fields list for executive view
+                const fields = res.map(ann => ({
+                    id: ann.id || ann.field_id,
+                    name: ann.field_name,
+                    header: ann.field_header,
+                    type: ann.field_type,
+                    placeholder: ann.placeholder || '',
+                    required: ann.required || false,
+                    value: '',
+                    annotation: {
+                        bbox: ann.annotation ? ann.annotation.bbox : { x1: 0, y1: 0, x2: 0, y2: 0 },
+                        page: ann.annotation ? ann.annotation.page : 1
+                    }
+                }));
+
+                setFormFields(fields);
+            } else {
+                setAnnotations([]);
+                setFormFields([]);
+                console.log('No annotations found for this form');
+            }
+        } catch (err) {
+            console.error('Fetch error:', err);
+            setAnnotations([]);
+            setFormFields([]);
+            showDialog('Fetch Failed', `Failed to fetch annotations: ${err.message || 'Unknown error'}. Please check your connection and try again.`, 'error');
+        }
+    };
+
+    // --- Handle clicking a field in executive mode: highlight and move to page ---
+    const handleFieldClick = (field) => {
+        setHighlightedField(field.id);
+        setCurrentPage(field.annotation.page - 1);
+
+        // Smooth scroll to canvas
+        setTimeout(() => {
+            canvasRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 100);
+    };
+
+    // --- Delete annotation handler (calls backend delete API if saved) ---
+    const handleDeleteAnnotation = async (localId) => {
+        try {
+            const ann = annotations.find(a => a.id === localId || a.field_id === localId);
+            if (!ann) return;
+
+            if (ann._saved) {
+                await apiDeleteAnnotation(ann.field_id);
+            }
+
+            setAnnotations(prev => prev.filter(a => a.id !== localId && a.field_id !== localId));
+            showDialog('Success', 'Annotation deleted successfully', 'success');
+        } catch (err) {
+            console.error('Delete error:', err);
+            showDialog('Delete Failed', 'Failed to delete annotation. Please try again.', 'error');
+        }
+    };
+
+    // --- Edit annotation metadata inline and call updateAnnotation if saved ---
+    const handleEditAnnotation = async (localId) => {
+        const ann = annotations.find(a => a.id === localId || a.field_id === localId);
+        if (!ann) return;
+
+        // Simple inline prompt for demo; swap with a modal/form for production
+        const newName = window.prompt('Edit field name', ann.field_name || '');
+        if (newName === null) return; // cancelled
+
+        const updatedLocal = { ...ann, field_name: newName };
+        setAnnotations(prev => prev.map(a => (a.id === localId || a.field_id === localId ? updatedLocal : a)));
+
+        if (ann._saved) {
+            try {
+                const payload = {
+                    process: updatedLocal.process,
+                    form_id: updatedLocal.form_id,
+                    field_id: updatedLocal.field_id,
+                    field_name: updatedLocal.field_name,
+                    field_header: updatedLocal.field_header,
+                    bbox: updatedLocal.bbox,
+                    page: updatedLocal.page,
+                    scale: updatedLocal.scale,
+                    field_type: updatedLocal.field_type,
+                    metadata: updatedLocal.metadata
+                };
+                await apiUpdateAnnotation(updatedLocal.field_id, payload);
+                showDialog('Success', 'Annotation updated on server', 'success');
             } catch (err) {
-                console.error("Update error:", err);
-                toast.error("Failed to update on server");
+                console.error('Update error:', err);
+                showDialog('Update Failed', 'Failed to update annotation on server. Please try again.', 'error');
             }
         } else {
-            toast("Annotation updated locally — save to persist", { icon: "💾" });
+            showDialog('Local Update', 'Annotation updated locally. Save to DB to persist.', 'info');
         }
-
-        resetForm();
     };
-
-    const getPixelAnnotations = () => {
-        const { width, height } = pdfPages[currentPage] || {};
-        if (!width || !height) return annotations;
-
-        return annotations.map(a => {
-            if (a._normalized && a.bbox) {
-                return { ...a, bbox: normalizedToPixel(a.bbox, width, height) };
-            }
-            return a;
-        });
-    };
-
-    // Zoom controls
-    const handleZoomIn = () => setZoom(prev => Math.min(3, prev + 0.25));
-    const handleZoomOut = () => setZoom(prev => Math.max(0.5, prev - 0.25));
-    const handleZoomReset = () => setZoom(1);
-
-    // Page navigation
-    const goToPreviousPage = () => setCurrentPage(prev => Math.max(0, prev - 1));
-    const goToNextPage = () => setCurrentPage(prev => Math.min(pdfPages.length - 1, prev + 1));
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
-            <AppToaster />
             <div className="max-w-7xl mx-auto">
                 {/* Header */}
-                <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-                    <div className="flex items-start justify-between gap-6">
-                        <div>
-                            <h1 className="text-3xl font-bold text-gray-900">PDF Field Mapping System</h1>
-                            <p className="text-gray-600 mt-2">Upload PDFs, draw bounding boxes, and configure form fields with metadata</p>
-                            {currentDocumentId && (
-                                <p className="text-sm text-blue-600 mt-1">Document ID: {currentDocumentId}</p>
-                            )}
-                        </div>
+                <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                    <h1 className="text-3xl font-bold text-gray-800 mb-2">PDF Field Mapping & Annotation System</h1>
+                    <p className="text-gray-600">Upload PDF, map fields with bounding boxes, and manage annotations</p>
 
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={() => { setMode("upload"); resetForm(); }}
-                                className={`px-5 py-2.5 rounded-lg font-medium transition-all ${mode === "upload"
-                                    ? "bg-blue-600 text-white shadow-md"
-                                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                                    }`}
-                            >
-                                <Upload className="inline mr-2" size={18} />
-                                Upload
-                            </button>
-                            <button
-                                onClick={() => { setMode("mapping"); resetForm(); }}
-                                disabled={!pdfFile}
-                                className={`px-5 py-2.5 rounded-lg font-medium transition-all ${mode === "mapping"
-                                    ? "bg-blue-600 text-white shadow-md"
-                                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                                    } disabled:opacity-50 disabled:cursor-not-allowed`}
-                            >
-                                Map Fields
-                            </button>
-                            <button
-                                onClick={() => { setMode("executive"); resetForm(); }}
-                                disabled={!pdfFile}
-                                className={`px-5 py-2.5 rounded-lg font-medium transition-all ${mode === "executive"
-                                    ? "bg-blue-600 text-white shadow-md"
-                                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                                    } disabled:opacity-50 disabled:cursor-not-allowed`}
-                            >
-                                <Eye className="inline mr-2" size={18} />
-                                Review
-                            </button>
-                        </div>
+                    <div className="flex gap-3 mt-4">
+                        <button
+                            onClick={() => setMode('upload')}
+                            className={`px-4 py-2 rounded-lg font-medium transition ${mode === 'upload' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                        >
+                            <Upload className="inline mr-2" size={18} />
+                            Upload PDF
+                        </button>
+
+                        <button
+                            onClick={() => { setMode('mapping'); loadFromDB(); }}
+                            disabled={!pdfFile}
+                            className={`px-4 py-2 rounded-lg font-medium transition ${mode === 'mapping' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                        >
+                            <Edit2 className="inline mr-2" size={18} />
+                            Mapping Mode
+                        </button>
+
+                        <button
+                            onClick={() => { setMode('executive'); loadFromDB(); }}
+                            disabled={!pdfFile}
+                            className={`px-4 py-2 rounded-lg font-medium transition ${mode === 'executive' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                        >
+                            <Eye className="inline mr-2" size={18} />
+                            Executive View
+                        </button>
                     </div>
                 </div>
 
                 {/* Upload Mode */}
-                {mode === "upload" && (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        <PDFUploader fileInputRef={fileInputRef} onChoose={handleFileUpload} />
-                        <div className="bg-white rounded-xl shadow-lg p-6">
-                            <h4 className="font-semibold text-lg mb-3">Usage Guidelines</h4>
-                            <ul className="text-sm text-gray-600 space-y-2">
-                                <li className="flex items-start">
-                                    <span className="text-blue-600 mr-2">•</span>
-                                    Use clear, high-resolution PDFs for accurate field detection
-                                </li>
-                                <li className="flex items-start">
-                                    <span className="text-blue-600 mr-2">•</span>
-                                    Draw bounding boxes tightly around target fields
-                                </li>
-                                <li className="flex items-start">
-                                    <span className="text-blue-600 mr-2">•</span>
-                                    Configure field metadata immediately after drawing
-                                </li>
-                                <li className="flex items-start">
-                                    <span className="text-blue-600 mr-2">•</span>
-                                    Click "Save All" to persist annotations to database
-                                </li>
-                            </ul>
+                {mode === 'upload' && (
+                    <div className="bg-white rounded-lg shadow-lg p-8">
+                        <div className="border-4 border-dashed border-gray-300 rounded-lg p-12 text-center hover:border-blue-400 transition">
+                            <Upload className="mx-auto mb-4 text-gray-400" size={48} />
+                            <h3 className="text-xl font-semibold mb-2">Upload PDF Document</h3>
+                            <p className="text-gray-600 mb-4">Select a PDF file to start mapping fields</p>
+                            <input ref={fileInputRef} type="file" accept="application/pdf" onChange={handleFileUpload} className="hidden" />
+                            <button onClick={() => fileInputRef.current?.click()} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition">
+                                Choose PDF File
+                            </button>
+                            {pdfFile && (
+                                <p className="mt-4 text-sm text-green-600 font-medium">✓ {pdfFile.name} loaded</p>
+                            )}
                         </div>
                     </div>
                 )}
 
                 {/* Mapping Mode */}
-                {mode === "mapping" && (
+                {mode === 'mapping' && (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-2 bg-white rounded-xl shadow-lg p-6">
-                            {/* PDF Controls */}
-                            <div className="flex justify-between items-center mb-4 pb-4 border-b">
-                                <h3 className="text-lg font-semibold">
-                                    Page {currentPage + 1} of {pdfPages.length}
-                                </h3>
-
-                                <div className="flex items-center gap-3">
-                                    <button
-                                        onClick={handleZoomOut}
-                                        disabled={zoom <= 0.5}
-                                        className="p-2 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                                        title="Zoom Out"
-                                    >
-                                        <ZoomOut size={18} />
-                                    </button>
-                                    <button
-                                        onClick={handleZoomReset}
-                                        className="px-3 py-1.5 bg-gray-100 rounded-lg hover:bg-gray-200 font-medium text-sm transition-colors"
-                                    >
-                                        {Math.round(zoom * 100)}%
-                                    </button>
-                                    <button
-                                        onClick={handleZoomIn}
-                                        disabled={zoom >= 3}
-                                        className="p-2 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                                        title="Zoom In"
-                                    >
-                                        <ZoomIn size={18} />
-                                    </button>
+                        {/* PDF Canvas */}
+                        <div className="lg:col-span-2 bg-white rounded-lg shadow-lg p-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-xl font-semibold">PDF Page {currentPage + 1} of {pdfPages.length}</h3>
+                                <div className="flex gap-2">
+                                    <button onClick={() => setZoom(Math.max(0.5, zoom - 0.25))} className="p-2 bg-gray-200 rounded hover:bg-gray-300"><ZoomOut size={20} /></button>
+                                    <span className="px-3 py-2 bg-gray-100 rounded font-medium">{Math.round(zoom * 100)}%</span>
+                                    <button onClick={() => setZoom(Math.min(3, zoom + 0.25))} className="p-2 bg-gray-200 rounded hover:bg-gray-300"><ZoomIn size={20} /></button>
                                 </div>
                             </div>
 
-                            {/* Canvas */}
-                            <div className="border-2 border-gray-200 rounded-lg p-3 mb-4 bg-gray-50">
-                                <PDFCanvas
-                                    pdfDoc={pdfDoc}
-                                    pageNumber={currentPage + 1}
-                                    zoom={zoom}
-                                    annotations={[...getPixelAnnotations(), ...(selectedAnnotation ? [{ ...selectedAnnotation, id: "temp" }] : [])]}
-                                    highlightedField={editingAnnotation?.field_id}
-                                    onStartDrawing={handleStartDrawing}
-                                    onDrawing={handleDrawing}
-                                    onFinishDrawing={handleFinishDrawing}
+                            <div className="border-2 border-gray-300 rounded-lg overflow-auto max-h-[600px] bg-gray-50">
+                                <canvas
+                                    ref={canvasRef}
+                                    onMouseDown={handleMouseDown}
+                                    onMouseMove={handleMouseMove}
+                                    onMouseUp={handleMouseUp}
+                                    className="cursor-crosshair w-full"
                                 />
                             </div>
 
-                            {/* Navigation */}
-                            <div className="flex justify-between items-center gap-2 mb-4">
-                                <button
-                                    onClick={goToPreviousPage}
-                                    disabled={currentPage === 0}
-                                    className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
-                                >
-                                    <ChevronLeft size={18} />
-                                    Previous
-                                </button>
-                                <span className="text-sm text-gray-600">
-                                    {annotations.filter(a => a.page === currentPage + 1).length} fields on this page
-                                </span>
-                                <button
-                                    onClick={goToNextPage}
-                                    disabled={currentPage === pdfPages.length - 1}
-                                    className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
-                                >
-                                    Next
-                                    <ChevronRight size={18} />
-                                </button>
+                            <div className="flex justify-between mt-4">
+                                <button onClick={() => setCurrentPage(Math.max(0, currentPage - 1))} disabled={currentPage === 0} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50">Previous Page</button>
+                                <button onClick={() => setCurrentPage(Math.min(pdfPages.length - 1, currentPage + 1))} disabled={currentPage === pdfPages.length - 1} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50">Next Page</button>
                             </div>
 
-                            {/* Save Button */}
-                            <button
-                                onClick={persistAll}
-                                disabled={loading || annotations.length === 0}
-                                className="w-full py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors shadow-md"
-                            >
-                                <Save className="inline mr-2" size={18} />
-                                {loading ? "Saving..." : `Save All Annotations (${annotations.filter(a => !a._saved).length} unsaved)`}
+                            <button onClick={saveToDB} className="w-full mt-4 bg-green-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-green-700 transition">
+                                <Save className="inline mr-2" size={20} />
+                                Save All Annotations to Database
                             </button>
                         </div>
 
-                        {/* Form & List */}
-                        <div className="bg-white rounded-xl shadow p-6">
-                            <div className="mb-4">
-                                <AnnotationForm
-                                    data={selectedAnnotation || fieldMetadata}
-                                    onChange={(updated) => {
-                                        if (selectedAnnotation) {
-                                            // Editing an existing annotation
-                                            setSelectedAnnotation({ ...selectedAnnotation, ...updated, metadata: updated });
-                                        } else {
-                                            // New annotation
-                                            setFieldMetadata(updated);
-                                        }
-                                    }}
-                                    onSave={() => {
-                                        if (selectedAnnotation && selectedAnnotation._saved) {
-                                            saveEdit(selectedAnnotation);
-                                        } else if (selectedAnnotation) {
-                                            saveAnnotationLocal();
-                                        }
-                                    }}
-                                    disabled={
-                                        !(selectedAnnotation || fieldMetadata.field_name)
-                                    }
-                                />
+                        {/* Field Metadata / Annotations List */}
+                        <div className="bg-white rounded-lg shadow-lg p-6">
+                            <h3 className="text-xl font-semibold mb-4">Field Configuration</h3>
+
+                            {selectedAnnotation && (
+                                <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded">
+                                    <p className="text-sm text-green-800">✓ Box drawn on page {selectedAnnotation.page}</p>
+                                </div>
+                            )}
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">Field Name *</label>
+                                    <input type="text" value={fieldMetadata.field_name} onChange={(e) => setFieldMetadata({ ...fieldMetadata, field_name: e.target.value })} placeholder="e.g., Application_Date" className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">Field Header</label>
+                                    <input type="text" value={fieldMetadata.field_header} onChange={(e) => setFieldMetadata({ ...fieldMetadata, field_header: e.target.value })} placeholder="e.g., Account Details" className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">Field Type</label>
+                                    <select value={fieldMetadata.field_type} onChange={(e) => setFieldMetadata({ ...fieldMetadata, field_type: e.target.value })} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500">
+                                        {fieldTypes.map(type => (<option key={type} value={type}>{type}</option>))}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">Placeholder</label>
+                                    <input type="text" value={fieldMetadata.placeholder} onChange={(e) => setFieldMetadata({ ...fieldMetadata, placeholder: e.target.value })} placeholder="e.g., Enter date" className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">Max Length</label>
+                                    <input type="number" value={fieldMetadata.max_length} onChange={(e) => setFieldMetadata({ ...fieldMetadata, max_length: parseInt(e.target.value || '0') })} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
+                                </div>
+
+                                <div className="flex items-center">
+                                    <input type="checkbox" checked={fieldMetadata.required} onChange={(e) => setFieldMetadata({ ...fieldMetadata, required: e.target.checked })} className="mr-2" />
+                                    <label className="text-sm font-medium">Required Field</label>
+                                </div>
+
+                                <button onClick={saveAnnotation} disabled={!selectedAnnotation || !fieldMetadata.field_name} className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition">
+                                    <CheckSquare className="inline mr-2" size={18} />
+                                    Save Field Annotation
+                                </button>
                             </div>
 
-                            <div className="mt-6 pt-6 border-t">
-                                <h4 className="font-semibold mb-3 text-lg">
-                                    Annotations ({annotations.length})
-                                </h4>
-                                <AnnotationList
-                                    annotations={annotations}
-                                    onEdit={(ann) => setSelectedAnnotation(ann)}  // Prefill
-                                    onDelete={(ann) => onDeleteRequest(ann)}
-                                />
+                            {/* Annotations List */}
+                            <div className="mt-6">
+                                <h4 className="font-semibold mb-2">Saved Annotations ({annotations.length})</h4>
+                                <div className="space-y-2 max-h-60 overflow-y-auto">
+                                    {annotations.map(ann => (
+                                        <div key={ann.id} className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                                            <div className="flex-1">
+                                                <p className="font-medium text-sm">{ann.field_name}</p>
+                                                <p className="text-xs text-gray-600">Page {ann.page} • {ann.field_type}</p>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <button onClick={() => handleEditAnnotation(ann.id)} className="text-blue-600 hover:text-blue-800 p-1"><Edit2 size={16} /></button>
+                                                <button onClick={() => handleDeleteAnnotation(ann.id)} className="text-red-600 hover:text-red-800 p-1"><Trash2 size={16} /></button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         </div>
                     </div>
                 )}
 
-                {/* Executive/Review Mode */}
-                {mode === "executive" && (
+                {/* Executive Mode */}
+                {mode === 'executive' && (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* Fields List */}
-                        <div className="bg-white rounded-xl shadow-lg p-6">
-                            <h3 className="font-semibold mb-4 text-xl">
-                                Mapped Fields ({annotations.length})
-                            </h3>
-                            <div className="space-y-2 max-h-[700px] overflow-y-auto">
-                                {annotations.length === 0 ? (
-                                    <div className="text-center py-12 text-gray-500">
-                                        <p className="mb-2">No fields mapped yet</p>
-                                        <p className="text-sm">Switch to Map mode to create annotations</p>
-                                    </div>
-                                ) : (
-                                    annotations
-                                        .filter(a => a.process === processId)
-                                        .map(field => (
-                                        <div
-                                            key={field.id}
-                                            onClick={() => {
-                                                setCurrentPage(field.page - 1);
-                                                toast(`Viewing: ${field.field_name}`, { icon: "👁️" });
-                                            }}
-                                            className="p-4 border-2 border-gray-200 rounded-lg hover:border-blue-400 hover:shadow-md cursor-pointer transition-all"
-                                        >
-                                            <div className="flex justify-between items-start">
-                                                <div className="flex-1">
-                                                    <div className="font-medium text-gray-900">
-                                                        {field.field_header || field.field_name}
-                                                        {field.metadata?.required && <span className="text-red-500 ml-1">*</span>}
-                                                    </div>
-                                                    <div className="text-xs text-gray-500 mt-1">
-                                                        Page {field.page} • {field.field_type}
-                                                    </div>
-                                                    {field.metadata?.placeholder && (
-                                                        <div className="text-xs text-gray-400 mt-1 italic">
-                                                            "{field.metadata.placeholder}"
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <div className={`px-2 py-1 rounded text-xs font-medium ${field._saved ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"
-                                                    }`}>
-                                                    {field._saved ? "Saved" : "Unsaved"}
-                                                </div>
+                        {/* Form Fields */}
+                        <div className="bg-white rounded-lg shadow-lg p-6">
+                            <h3 className="text-xl font-semibold mb-4">Form Fields</h3>
+                            <p className="text-sm text-gray-600 mb-4">Click any field to highlight its location on the PDF</p>
+
+                            <div className="space-y-4 max-h-[700px] overflow-y-auto">
+                                {formFields.length > 0 ? (
+                                    formFields.map(field => (
+                                        <div key={field.id} onClick={() => handleFieldClick(field)} className={`p-4 border-2 rounded-lg cursor-pointer transition ${highlightedField === field.id ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-blue-400 hover:bg-blue-50'}`}>
+                                            <div className="flex justify-between items-start mb-2">
+                                                <label className="font-medium text-gray-700">{field.header || field.name}</label>
+                                                {field.required && <span className="text-red-500 text-sm">*</span>}
                                             </div>
+
+                                            {field.type === 'DateField' && (<input type="date" placeholder={field.placeholder} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />)}
+                                            {field.type === 'NumberField' && (<input type="number" placeholder={field.placeholder} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />)}
+                                            {field.type === 'EmailField' && (<input type="email" placeholder={field.placeholder} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />)}
+                                            {field.type === 'TextAreaField' && (<textarea placeholder={field.placeholder} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" rows={3} />)}
+                                            {field.type === 'BooleanField' && (<div className="flex items-center"><input type="checkbox" className="mr-2" /><span className="text-sm">{field.placeholder}</span></div>)}
+                                            {field.type === 'CharField' && (<input type="text" placeholder={field.placeholder} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />)}
+
+                                            <p className="text-xs text-gray-500 mt-2">Page {field.annotation.page} • {field.type}</p>
                                         </div>
                                     ))
+                                ) : (
+                                    <div className="text-center py-8">
+                                        <p className="text-gray-500">No form fields found. Please go to Mapping Mode to create annotations.</p>
+                                        <button 
+                                            onClick={() => setMode('mapping')} 
+                                            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                                        >
+                                            Go to Mapping Mode
+                                        </button>
+                                    </div>
                                 )}
                             </div>
                         </div>
 
                         {/* PDF Preview */}
-                        <div className="bg-white rounded-xl shadow-lg p-6">
-                            <div className="flex justify-between items-center mb-4">
-                                <h3 className="font-semibold text-xl">PDF Preview</h3>
-                                <div className="flex items-center gap-2">
-                                    <button onClick={handleZoomOut} disabled={zoom <= 0.5} className="p-2 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-40">
-                                        <ZoomOut size={16} />
-                                    </button>
-                                    <span className="px-3 py-1 bg-gray-100 rounded-lg text-sm font-medium">
-                                        {Math.round(zoom * 100)}%
-                                    </span>
-                                    <button onClick={handleZoomIn} disabled={zoom >= 3} className="p-2 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-40">
-                                        <ZoomIn size={16} />
-                                    </button>
-                                </div>
+                        <div className="bg-white rounded-lg shadow-lg p-6 sticky top-6">
+                            <h3 className="text-xl font-semibold mb-4">PDF Preview</h3>
+
+                            <div className="border-2 border-gray-300 rounded-lg overflow-auto max-h-[700px] bg-gray-50">
+                                <canvas ref={canvasRef} className="w-full" />
                             </div>
 
-                            <div className="border-2 border-gray-200 rounded-lg p-3 mb-4 bg-gray-50">
-                                <PDFCanvas
-                                    pdfDoc={pdfDoc}
-                                    pageNumber={currentPage + 1}
-                                    zoom={zoom}
-                                    annotations={getPixelAnnotations().filter(a => a.page === currentPage + 1)}
-                                    highlightedField={null}
-                                    onStartDrawing={() => { }}
-                                    onDrawing={() => { }}
-                                    onFinishDrawing={() => { }}
-                                />
-                            </div>
-
-                            <div className="flex justify-between items-center">
-                                <button
-                                    onClick={goToPreviousPage}
-                                    disabled={currentPage === 0}
-                                    className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
-                                >
-                                    <ChevronLeft size={18} />
-                                    Previous
-                                </button>
-                                <div className="px-4 py-2 text-sm font-medium">
-                                    Page {currentPage + 1} / {pdfPages.length}
-                                </div>
-                                <button
-                                    onClick={goToNextPage}
-                                    disabled={currentPage === pdfPages.length - 1}
-                                    className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
-                                >
-                                    Next
-                                    <ChevronRight size={18} />
-                                </button>
+                            <div className="flex justify-between mt-4">
+                                <button onClick={() => setCurrentPage(Math.max(0, currentPage - 1))} disabled={currentPage === 0} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50">Previous</button>
+                                <span className="px-4 py-2 font-medium">Page {currentPage + 1} / {pdfPages.length}</span>
+                                <button onClick={() => setCurrentPage(Math.min(pdfPages.length - 1, currentPage + 1))} disabled={currentPage === pdfPages.length - 1} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50">Next</button>
                             </div>
                         </div>
                     </div>
                 )}
-
-                {/* Confirm Delete Modal */}
-                <GenericModal
-                    open={confirmModal.open}
-                    title="Delete Annotation"
-                    description={`Are you sure you want to delete "${confirmModal.ann?.field_name}"? This action cannot be undone.`}
-                    onClose={() => setConfirmModal({ open: false, ann: null, onConfirm: null })}
-                    onConfirm={() => confirmModal.onConfirm && confirmModal.onConfirm()}
-                    confirmLabel="Delete"
-                    loading={loading}
-                />
             </div>
+
+            {/* Dialog Component */}
+            <Dialog 
+                isOpen={dialog.isOpen}
+                onClose={closeDialog}
+                title={dialog.title}
+                type={dialog.type}
+            >
+                <p>{dialog.message}</p>
+            </Dialog>
         </div>
     );
 };

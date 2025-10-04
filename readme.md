@@ -222,12 +222,7 @@ pdf-annotation-system/
 ├── public/                 # Static assets
 ├── src/
 │   ├── components/         # React components
-│   │   ├── AnnotationForm.jsx
-│   │   ├── AnnotationList.jsx
-│   │   ├── GenericModal.jsx
 │   │   ├── PDFAnnotationSystem.jsx
-│   │   ├── PDFCanvas.jsx
-│   │   ├── PDFUploader.jsx
 │   │   └── Toaster.jsx
 │   ├── helpers/            # Utility functions
 │   │   ├── api.js          # API service functions
