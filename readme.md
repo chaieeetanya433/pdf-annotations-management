@@ -1,7 +1,8 @@
 
 
-```markdown
 # PDF Field Mapping and Annotation Management System
+
+![Cover Image](./frontend/public/pdf-mapping.png)
 
 A comprehensive React-based solution for mapping and annotating PDF form fields with bounding boxes, saving metadata to a database, and reviewing annotations.
 
@@ -275,4 +276,3 @@ For support, please open an issue in the GitHub repository or contact the develo
 ---
 
 **Note**: This README assumes a backend API is already implemented to support the endpoints described. The frontend code is designed to work with a Node.js/Express backend, but can be adapted to work with other backend technologies.
-```
