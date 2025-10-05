@@ -32,7 +32,7 @@ const AnnotationsList = ({ annotations, handleEditAnnotation, handleDeleteAnnota
                                         variant="ghost"
                                         size="icon"
                                         onClick={() => handleEditAnnotation(ann.id)}
-                                        className="h-8 w-8 text-blue-600 hover:text-blue-800"
+                                        className="h-8 w-8 cursor-pointer text-blue-600 hover:text-blue-800"
                                     >
                                         <Edit2 size={16} />
                                     </Button>
@@ -40,7 +40,7 @@ const AnnotationsList = ({ annotations, handleEditAnnotation, handleDeleteAnnota
                                         variant="ghost"
                                         size="icon"
                                         onClick={() => handleDeleteAnnotation(ann.id)}
-                                        className="h-8 w-8 text-red-600 hover:text-red-800"
+                                        className="h-8 w-8 cursor-pointer text-red-600 hover:text-red-800"
                                     >
                                         <Trash2 size={16} />
                                     </Button>

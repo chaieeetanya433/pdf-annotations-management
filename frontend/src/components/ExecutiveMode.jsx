@@ -132,6 +132,7 @@ const ExecutiveMode = ({
                                 variant="outline"
                                 onClick={() => setCurrentPage(Math.max(0, currentPage - 1))}
                                 disabled={currentPage === 0}
+                                className="disabled:cursor-not-allowed cursor-pointer"
                             >
                                 Previous
                             </Button>
@@ -142,6 +143,7 @@ const ExecutiveMode = ({
                                 variant="outline"
                                 onClick={() => setCurrentPage(Math.min(pdfPages.length - 1, currentPage + 1))}
                                 disabled={currentPage === pdfPages.length - 1}
+                                className="disabled:cursor-not-allowed cursor-pointer"
                             >
                                 Next
                             </Button>

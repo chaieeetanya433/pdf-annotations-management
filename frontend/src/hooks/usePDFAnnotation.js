@@ -16,6 +16,10 @@ const usePDFAnnotation = () => {
     const [selectedAnnotation, setSelectedAnnotation] = useState(null);
     const [formFields, setFormFields] = useState([]);
     const [highlightedField, setHighlightedField] = useState(null);
+    const [editModal, setEditModal] = useState({
+        isOpen: false,
+        annotation: null
+    });
 
     const canvasRef = useRef(null);
     const fileInputRef = useRef(null);
@@ -410,15 +414,31 @@ const usePDFAnnotation = () => {
     };
 
     // --- Edit annotation metadata ---
-    const handleEditAnnotation = async (localId) => {
+    // Replace the handleEditAnnotation function with:
+    const handleEditAnnotation = (localId) => {
         const ann = annotations.find(a => a.id === localId || a.field_id === localId);
         if (!ann) return;
 
-        const newName = window.prompt('Edit field name', ann.field_name || '');
-        if (newName === null) return;
+        setEditModal({
+            isOpen: true,
+            annotation: ann
+        });
+    };
 
-        const updatedLocal = { ...ann, field_name: newName };
-        setAnnotations(prev => prev.map(a => (a.id === localId || a.field_id === localId ? updatedLocal : a)));
+    // Add this new function to handle the save from modal:
+    const handleSaveEditedAnnotation = async (updatedData) => {
+        const ann = editModal.annotation;
+        if (!ann) return;
+
+        const updatedLocal = {
+            ...ann,
+            field_name: updatedData.field_name,
+            field_header: updatedData.field_header
+        };
+
+        setAnnotations(prev => prev.map(a =>
+            (a.id === ann.id || a.field_id === ann.field_id ? updatedLocal : a)
+        ));
 
         if (ann._saved) {
             try {
@@ -483,7 +503,10 @@ const usePDFAnnotation = () => {
         loadFromDB,
         handleFieldClick,
         handleDeleteAnnotation,
-        handleEditAnnotation
+        handleEditAnnotation,
+        editModal,
+        setEditModal,
+        handleSaveEditedAnnotation
     };
 };
 

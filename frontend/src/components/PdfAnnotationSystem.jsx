@@ -6,6 +6,7 @@ import UploadMode from './UploadMode';
 import MappingMode from './MappingMode';
 import ExecutiveMode from './ExecutiveMode';
 import Dialog from './Dialog';
+import EditAnnotationModal from './EditAnnotationModal';
 
 const PDFAnnotationSystem = () => {
   const {
@@ -45,17 +46,20 @@ const PDFAnnotationSystem = () => {
     loadFromDB,
     handleFieldClick,
     handleDeleteAnnotation,
-    handleEditAnnotation
+    handleEditAnnotation,
+    editModal,
+    setEditModal,
+    handleSaveEditedAnnotation
   } = usePDFAnnotation();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
       <div className="max-w-7xl mx-auto">
-        <Header 
-          mode={mode} 
-          setMode={setMode} 
-          pdfFile={pdfFile} 
-          loadFromDB={loadFromDB} 
+        <Header
+          mode={mode}
+          setMode={setMode}
+          pdfFile={pdfFile}
+          loadFromDB={loadFromDB}
         />
 
         <AnimatePresence mode="wait">
@@ -67,15 +71,15 @@ const PDFAnnotationSystem = () => {
             transition={{ duration: 0.3 }}
           >
             {mode === 'upload' && (
-              <UploadMode 
-                handleFileUpload={handleFileUpload} 
-                fileInputRef={fileInputRef} 
-                pdfFile={pdfFile} 
+              <UploadMode
+                handleFileUpload={handleFileUpload}
+                fileInputRef={fileInputRef}
+                pdfFile={pdfFile}
               />
             )}
 
             {mode === 'mapping' && (
-              <MappingMode 
+              <MappingMode
                 pdfDoc={pdfDoc}
                 pdfPages={pdfPages}
                 currentPage={currentPage}
@@ -99,7 +103,7 @@ const PDFAnnotationSystem = () => {
             )}
 
             {mode === 'executive' && (
-              <ExecutiveMode 
+              <ExecutiveMode
                 formFields={formFields}
                 highlightedField={highlightedField}
                 handleFieldClick={handleFieldClick}
@@ -114,7 +118,7 @@ const PDFAnnotationSystem = () => {
           </motion.div>
         </AnimatePresence>
 
-        <Dialog 
+        <Dialog
           isOpen={dialog.isOpen}
           onClose={closeDialog}
           title={dialog.title}
@@ -122,6 +126,12 @@ const PDFAnnotationSystem = () => {
         >
           <p>{dialog.message}</p>
         </Dialog>
+        <EditAnnotationModal
+          isOpen={editModal.isOpen}
+          onClose={() => setEditModal({ isOpen: false, annotation: null })}
+          annotation={editModal.annotation}
+          onSave={handleSaveEditedAnnotation}
+        />
       </div>
     </div>
   );

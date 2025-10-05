@@ -101,7 +101,8 @@ const FieldConfigForm = ({
                 <Button
                     onClick={saveAnnotation}
                     disabled={!selectedAnnotation || !fieldMetadata.field_name}
-                    className="w-full"
+                    className="w-full disabled:cursor-not-allowed cursor-pointer"
+                    variant="outline" 
                 >
                     <CheckSquare className="inline mr-2" size={18} />
                     Save Field Annotation
