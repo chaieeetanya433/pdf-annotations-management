@@ -1,8 +1,7 @@
 const mongoose = require('mongoose');
 
 const AnnotationSchema = new mongoose.Schema({
-    process: Number,
-    form_id: Number,
+    form_id: { type: Number, required: true }, // Only form_id needed
     field_id: Number,
     field_name: String,
     field_header: String,

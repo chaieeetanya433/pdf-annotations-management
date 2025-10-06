@@ -2,11 +2,12 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import usePDFAnnotation from '../hooks/usePDFAnnotation';
 import Header from './Header';
-import UploadMode from './UploadMode';
 import MappingMode from './MappingMode';
 import ExecutiveMode from './ExecutiveMode';
 import Dialog from './Dialog';
 import EditAnnotationModal from './EditAnnotationModal';
+import DocumentsMode from './DocumentMode';
+import ConfirmDialog from './ConfirmDialog';
 
 const PDFAnnotationSystem = () => {
   const {
@@ -24,7 +25,6 @@ const PDFAnnotationSystem = () => {
     highlightedField,
     canvasRef,
     fileInputRef,
-    processId,
     formId,
     dialog,
     showDialog,
@@ -32,24 +32,28 @@ const PDFAnnotationSystem = () => {
     fieldMetadata,
     setFieldMetadata,
     selectedAnnotation,
-    setSelectedAnnotation,
-    isDrawing,
-    setIsDrawing,
-    startPoint,
-    setStartPoint,
     handleFileUpload,
     handleMouseDown,
     handleMouseMove,
     handleMouseUp,
     saveAnnotation,
     saveToDB,
-    loadFromDB,
+    fetchAnnotations,
     handleFieldClick,
     handleDeleteAnnotation,
     handleEditAnnotation,
     editModal,
     setEditModal,
-    handleSaveEditedAnnotation
+    handleSaveEditedAnnotation,
+    documents,
+    isLoadingDocuments,
+    handleDeleteDocument,
+    handleSelectDocument,
+    currentDocument,
+    deleteConfirmDialog,
+    confirmDeleteDocument,
+    cancelDeleteDocument,
+    loadDocuments
   } = usePDFAnnotation();
 
   return (
@@ -58,8 +62,9 @@ const PDFAnnotationSystem = () => {
         <Header
           mode={mode}
           setMode={setMode}
-          pdfFile={pdfFile}
-          loadFromDB={loadFromDB}
+          currentDocument={currentDocument}
+          fetchAnnotations={fetchAnnotations}
+          loadDocuments={loadDocuments}
         />
 
         <AnimatePresence mode="wait">
@@ -70,11 +75,15 @@ const PDFAnnotationSystem = () => {
             exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.3 }}
           >
-            {mode === 'upload' && (
-              <UploadMode
-                handleFileUpload={handleFileUpload}
+            {mode === 'documents' && (
+              <DocumentsMode
+                documents={documents}
+                isLoadingDocuments={isLoadingDocuments}
+                handleSelectDocument={handleSelectDocument}
+                handleDeleteDocument={handleDeleteDocument}
+                setMode={setMode}
                 fileInputRef={fileInputRef}
-                pdfFile={pdfFile}
+                handleFileUpload={handleFileUpload}
               />
             )}
 
@@ -126,11 +135,20 @@ const PDFAnnotationSystem = () => {
         >
           <p>{dialog.message}</p>
         </Dialog>
+
         <EditAnnotationModal
           isOpen={editModal.isOpen}
           onClose={() => setEditModal({ isOpen: false, annotation: null })}
           annotation={editModal.annotation}
           onSave={handleSaveEditedAnnotation}
+        />
+
+        <ConfirmDialog
+          isOpen={deleteConfirmDialog.isOpen}
+          onConfirm={confirmDeleteDocument}
+          onCancel={cancelDeleteDocument}
+          title="Delete Document"
+          message="Are you sure you want to delete this document? This action cannot be undone and will remove all associated annotations."
         />
       </div>
     </div>

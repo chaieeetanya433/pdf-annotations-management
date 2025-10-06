@@ -1,4 +1,3 @@
-// components/pdf-annotation/components/MappingMode.jsx
 import React from 'react';
 import { motion } from 'framer-motion';
 import { ZoomIn, ZoomOut, Save } from 'lucide-react';

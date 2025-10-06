@@ -1,6 +1,5 @@
 const Annotation = require('../models/Annotation.js');
 
-// Save bulk annotations
 exports.saveBulkAnnotations = async (req, res) => {
     try {
         const annotations = req.body;
@@ -14,11 +13,11 @@ exports.saveBulkAnnotations = async (req, res) => {
     }
 };
 
-// Fetch annotations
 exports.fetchAnnotations = async (req, res) => {
     try {
-        const { process_id, form_id } = req.body;
-        const annotations = await Annotation.find({ process: process_id, form_id });
+        const { form_id } = req.body;
+        const annotations = await Annotation.find({ form_id });
+
         const formatted = annotations.map(ann => ({
             id: ann.field_id,
             annotation: {
@@ -27,29 +26,24 @@ exports.fetchAnnotations = async (req, res) => {
                 field_id: ann.field_id,
                 field_name: ann.field_name,
                 field_header: ann.field_header,
-                process: ann.process,
                 form_id: ann.form_id
             },
-            table_name: `table_${ann.process}_qc`,
             field_name: ann.field_name,
             field_type: ann.field_type,
             max_length: ann.metadata.max_length || 0,
-            group: 1,
             placeholder: ann.metadata.placeholder,
             required: ann.metadata.required,
-            field_options: "[]",
-            types: ann.field_type.toLowerCase().replace('field', ''),
             validation_code: ann.metadata.validation_code,
             regex_ptn: ann.metadata.regex_ptn,
-            process_id: ann.process.toString()
+            form_id: ann.form_id.toString()
         }));
+
         res.json(formatted);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 };
 
-// Update annotation
 exports.updateAnnotation = async (req, res) => {
     try {
         const updated = await Annotation.findOneAndUpdate(
@@ -63,7 +57,6 @@ exports.updateAnnotation = async (req, res) => {
     }
 };
 
-// Delete annotation
 exports.deleteAnnotation = async (req, res) => {
     try {
         await Annotation.findOneAndDelete({ field_id: req.params.id });
@@ -73,10 +66,10 @@ exports.deleteAnnotation = async (req, res) => {
     }
 };
 
-// Get annotations by process
-exports.getAnnotationsByProcess = async (req, res) => {
+// Get annotations by form_id
+exports.getAnnotationsByForm = async (req, res) => {
     try {
-        const annotations = await Annotation.find({ process: req.params.process_id });
+        const annotations = await Annotation.find({ form_id: req.params.form_id });
         res.json(annotations);
     } catch (error) {
         res.status(500).json({ error: error.message });

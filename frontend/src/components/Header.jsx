@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { Button } from './ui/button';
 import { Upload, Edit2, Eye } from 'lucide-react';
 
-const Header = ({ mode, setMode, pdfFile, loadFromDB }) => {
+const Header = ({ mode, setMode, currentDocument, fetchAnnotations, loadDocuments }) => {
   return (
     <motion.div 
       className="bg-white rounded-lg shadow-lg p-6 mb-6"
@@ -16,18 +16,10 @@ const Header = ({ mode, setMode, pdfFile, loadFromDB }) => {
       <p className="text-gray-600">Upload PDF, map fields with bounding boxes, and manage annotations</p>
 
       <div className="flex gap-3 mt-4">
-        <Button
-          onClick={() => setMode('upload')}
-          variant={mode === 'upload' ? 'default' : 'outline'}
-          className="flex items-center gap-2 cursor-pointer"
-        >
-          <Upload size={18} />
-          Upload PDF
-        </Button>
 
         <Button
-          onClick={() => { setMode('mapping'); loadFromDB(); }}
-          disabled={!pdfFile}
+          onClick={() => { setMode('mapping'); fetchAnnotations(); }}
+          disabled={!currentDocument}
           variant={mode === 'mapping' ? 'default' : 'outline'}
           className={`flex items-center gap-2 ${mode === 'mapping' ? '' : 'cursor-pointer'}`}
         >
@@ -36,13 +28,22 @@ const Header = ({ mode, setMode, pdfFile, loadFromDB }) => {
         </Button>
 
         <Button
-          onClick={() => { setMode('executive'); loadFromDB(); }}
-          disabled={!pdfFile}
+          onClick={() => { setMode('executive'); fetchAnnotations(); }}
+          disabled={!currentDocument}
           variant={mode === 'executive' ? 'default' : 'outline'}
           className={`flex items-center gap-2 ${mode === 'executive' ? '' : 'cursor-pointer'}`}
         >
           <Eye size={18} />
           Executive View
+        </Button>
+
+        <Button
+          onClick={() => { setMode('documents'); loadDocuments(); }}
+          variant={mode === 'documents' ? 'default' : 'outline'}
+          className={`flex items-center gap-2 ${mode === 'documents' ? '' : 'cursor-pointer'}`}
+        >
+          <Eye size={18} />
+          Documents
         </Button>
       </div>
     </motion.div>

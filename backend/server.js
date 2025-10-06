@@ -6,6 +6,7 @@ const connectDB = require('./config/db.js');
 
 const uploadRoutes = require('./routes/uploadRoutes.js');
 const annotationRoutes = require('./routes/annotationRoutes.js');
+const documentRoutes = require('./routes/documentRoutes');
 
 const app = express();
 app.use(cors());
@@ -17,6 +18,7 @@ connectDB();
 // Routes
 app.use('/api', uploadRoutes);
 app.use('/api', annotationRoutes);
+app.use('/api', documentRoutes);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

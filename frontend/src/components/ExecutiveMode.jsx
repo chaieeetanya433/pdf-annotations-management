@@ -1,4 +1,3 @@
-// components/pdf-annotation/components/ExecutiveMode.jsx
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from './ui/button';
@@ -100,7 +99,8 @@ const ExecutiveMode = ({
                                         <p className="text-gray-500">No form fields found. Please go to Mapping Mode to create annotations.</p>
                                         <Button
                                             onClick={() => setMode('mapping')}
-                                            className="mt-4"
+                                            className="mt-4 cursor-pointer"
+                                            variant="outline"
                                         >
                                             Go to Mapping Mode
                                         </Button>

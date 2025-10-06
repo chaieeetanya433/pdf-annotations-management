@@ -1,25 +1,10 @@
+// components/pdf-annotation/components/ConfirmDialog.jsx
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, AlertCircle, Check, Info } from 'lucide-react';
+import { AlertTriangle, X } from 'lucide-react';
 import { Button } from './ui/button';
 
-const Dialog = ({ isOpen, onClose, title, children, type = 'info' }) => {
-    const getIcon = () => {
-        switch (type) {
-            case 'error': return <AlertCircle className="text-red-500" size={24} />;
-            case 'success': return <Check className="text-green-500" size={24} />;
-            default: return <Info className="text-blue-500" size={24} />;
-        }
-    };
-
-    const getButtonColor = () => {
-        switch (type) {
-            case 'error': return 'bg-red-600 hover:bg-red-700';
-            case 'success': return 'bg-green-600 hover:bg-green-700';
-            default: return 'bg-blue-600 hover:bg-blue-700';
-        }
-    };
-
+const ConfirmDialog = ({ isOpen, onConfirm, onCancel, title, message }) => {
     return (
         <AnimatePresence>
             {isOpen && (
@@ -30,13 +15,13 @@ const Dialog = ({ isOpen, onClose, title, children, type = 'info' }) => {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        onClick={onClose}
+                        onClick={onCancel}
                     />
 
                     {/* Dialog Content */}
                     <motion.div
-                        className="relative bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 
-                                   rounded-lg shadow-xl max-w-md w-full z-10"
+                        className="relative bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100
+              rounded-lg shadow-xl max-w-md w-full z-10"
                         initial={{ opacity: 0, scale: 0.9, y: 20 }}
                         animate={{ opacity: 1, scale: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -45,11 +30,11 @@ const Dialog = ({ isOpen, onClose, title, children, type = 'info' }) => {
                         {/* Header */}
                         <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
                             <div className="flex items-center gap-3">
-                                {getIcon()}
+                                <AlertTriangle className="text-red-500" size={24} />
                                 <h3 className="text-lg font-semibold">{title}</h3>
                             </div>
                             <button
-                                onClick={onClose}
+                                onClick={onCancel}
                                 className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                             >
                                 <X size={20} />
@@ -58,16 +43,25 @@ const Dialog = ({ isOpen, onClose, title, children, type = 'info' }) => {
 
                         {/* Body */}
                         <div className="p-6">
-                            <p className="text-gray-700 dark:text-gray-200">{children}</p>
+                            <p className="text-gray-700 dark:text-gray-200">{message}</p>
                         </div>
 
                         {/* Footer */}
-                        <div className="flex justify-end p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 rounded-b-lg">
+                        <div className="flex justify-end gap-3 p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 rounded-b-lg">
                             <Button
-                                onClick={onClose}
-                                className={`px-4 py-2 text-white cursor-pointer font-medium rounded-lg transition-colors ${getButtonColor()}`}
+                                onClick={onCancel}
+                                className="px-4 py-2 text-gray-700 dark:text-gray-300 font-medium rounded-lg 
+                  border border-gray-300 dark:border-gray-600 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 
+                  transition-colors"
                             >
-                                OK
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={onConfirm}
+                                className="px-4 py-2 text-white cursor-pointer font-medium rounded-lg bg-red-600 hover:bg-red-700 
+                  transition-colors"
+                            >
+                                Delete
                             </Button>
                         </div>
                     </motion.div>
@@ -77,4 +71,4 @@ const Dialog = ({ isOpen, onClose, title, children, type = 'info' }) => {
     );
 };
 
-export default Dialog;
+export default ConfirmDialog;
